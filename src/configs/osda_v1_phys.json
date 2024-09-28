@@ -1,0 +1,19 @@
+{
+    "mol_weight": 1.0,
+    "mol_volume": 1.0,
+    "asphericity": 1.0,
+    "eccentricity": 1.0,
+    "inertial_shape_factor": 1.0,
+    "spherocity_index": 1.0,
+    "gyration_radius": 1.0,
+    "pmi1": 1.0,
+    "pmi2": 1.0,
+    "pmi3": 1.0,
+    "npr1": 1.0,
+    "npr2": 1.0,
+    "free_sasa": 1.0,
+    "bertz_ct": 1.0,
+    "num_rot_bonds": 1.0,
+    "num_bonds": 1.0,
+    "formal_charge": 1.0
+}

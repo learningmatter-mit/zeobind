@@ -1,0 +1,20 @@
+{
+    "a": 1.0,
+    "b": 1.0,
+    "c": 1.0,
+    "alpha": 1.0,
+    "beta": 1.0,
+    "gamma": 1.0,
+    "num_atoms_per_vol": 1.0,
+    "num_atoms": 1.0,
+    "volume": 1.0,
+    "largest_free_sphere": 1.0,
+    "largest_free_sphere_a": 1.0,
+    "largest_free_sphere_b": 1.0,
+    "largest_free_sphere_c": 1.0,
+    "largest_included_sphere": 1.0,
+    "largest_included_sphere_a": 1.0,
+    "largest_included_sphere_b": 1.0,
+    "largest_included_sphere_c": 1.0,
+    "largest_included_sphere_fsp": 1.0
+}
