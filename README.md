@@ -11,13 +11,10 @@ mamba create -f environment.yml
 mamba activate zeobind
 ```
 
-The data used in the paper, dataset of hypothetical molecules, as well as predictions across all the IZA framework - hypothetical molecule chemical space, can be found at Materials Data Facility. [TODO insert MDF DOI] Download the data and place it in the `data` directory.
+The data used in the paper, dataset of hypothetical molecules, as well as predictions across all the IZA framework - hypothetical molecule chemical space, can be found at Materials Data Fac ility. [TODO insert MDF DOI] Download the data and place it in the `data` directory.
 
 ## Usage 
 
-### Reproducing results and figures 
-
-The notebooks in the `notebooks` directory generate metrics and figures reported in the paper. 
 
 ### Screening molecules from predictions 
 
@@ -46,3 +43,7 @@ To train models, template bash scripts can be found at `run_scripts/training/`.
 # example
 bash run_scripts/training/binary/template.sh
 ```
+
+### Reproducing results and figures 
+
+The notebooks in the `notebooks` directory generate metrics and figures reported in the paper. 

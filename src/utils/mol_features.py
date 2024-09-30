@@ -1,10 +1,11 @@
 import json
+import os
 import random
 import numpy as np
 import pandas as pd
-from rdkit import Chem
 from rdkit.Chem import Descriptors3D, rdFreeSASA, GraphDescriptors, MolFromSmiles, AddHs
 from rdkit.Chem import rdMolDescriptors as rdMD
+from rdkit.Chem import AllChem as Chem
 from sklearn.decomposition import IncrementalPCA
 from rdkit.Chem.AllChem import (
     ComputeMolVolume,
@@ -15,9 +16,9 @@ from rdkit.Chem.AllChem import (
     GetConformerRMS,
 )
 from rdkit.Chem.rdmolops import RemoveHs
+PERIODICTABLE = Chem.GetPeriodicTable()
 
-from zeobind.src.utils.utils import log_msg
-
+from zeobind.src.utils.logger import log_msg
 
 def get_whim(mol):
     return rdMD.CalcWHIM(mol)
@@ -127,6 +128,15 @@ def get_bertz_ct(mol):
     return GraphDescriptors.BertzCT(mol)
 
 
+def get_mol_weight(mol):
+    weights = [PERIODICTABLE.GetAtomicWeight(atom.GetSymbol()) for atom in mol.GetAtoms()]
+    return sum(weights)
+
+
+def get_formal_charge(mol):
+    return Chem.GetFormalCharge(mol)
+
+
 def list_wrapper(fn):
     def wrapper(*args, **kwargs):
         result = fn(*args, **kwargs)
@@ -139,7 +149,7 @@ def list_wrapper(fn):
 
 METRIC_FUNCTIONS = {
     "box": get_box,
-    "volume": list_wrapper(get_volume),
+    "mol_volume": list_wrapper(get_volume),
     "axes": list_wrapper(get_axes),
     "whim": list_wrapper(get_whim),
     "getaway": list_wrapper(get_getaway),
@@ -158,6 +168,8 @@ METRIC_FUNCTIONS = {
     "free_sasa": list_wrapper(get_free_sasa),
     "bertz_ct": list_wrapper(get_bertz_ct),
     "morse": list_wrapper(get_morse),
+    "mol_weight": list_wrapper(get_mol_weight),
+    "formal_charge": list_wrapper(get_formal_charge),
 }
 
 
@@ -349,8 +361,9 @@ class ConformerGenerator(object):
 
 def compute_osda_features(
     smiles,
+    num_conformers=20,
 ):
-    with open("../configs/osda_v1_phys.json", "r") as f:
+    with open("zeobind/src/configs/osda_v1_phys.json", "r") as f:
         config = json.load(f)
 
     features = pd.DataFrame(index=smiles, columns=config.keys())
@@ -360,11 +373,12 @@ def compute_osda_features(
         generator.generate()
         generator.minimise()
         clustered_confs = generator.cluster()
+        clustered_confs = clustered_confs[:num_conformers]
 
         for fea in features.columns:
             conf_feas = []
             for i, conf in enumerate(clustered_confs):
-                conf_feas.append(METRIC_FUNCTIONS[fea](conf[0]))
+                conf_feas.append(METRIC_FUNCTIONS[fea](conf[0].GetOwningMol()))
             conf_feas = np.array(conf_feas)
             conf_feas = np.mean(conf_feas, axis=0)
             features.loc[smi, fea] = conf_feas

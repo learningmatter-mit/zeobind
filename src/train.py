@@ -8,7 +8,7 @@ import yaml
 from zeobind.src.models.xgb import XGBTrainer
 from zeobind.src.models.mlp import MLPTrainer
 from utils.pred_tasks import PREDICTION_TASK_DICT
-from utils.utils import log_msg
+from utils.logger import log_msg
 
 
 def preprocess(args: argparse.Namespace) -> dict:

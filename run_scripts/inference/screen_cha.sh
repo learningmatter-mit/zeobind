@@ -12,9 +12,10 @@ cd $parent_dir
 fw=CHA
 python zeobind/src/screen.py \
     --parallel \
-    --num_threads 24 \
+    --num_threads 8 \
     --preds_dir $preds_dir/hyp_mols/diq \
-    --opriors_dir hyp_mols_data/diq \
+    --opriors_dir $data_dir/hyp_mols_data/diq \
+    --nfiles 180 \
     --ofile_root osda_priors \
     --zfile_root zeolite_priors \
     --output $filtered_dir/$fw \

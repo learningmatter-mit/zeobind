@@ -8,7 +8,7 @@ import pandas as pd
 import json
 from sklearn.preprocessing import StandardScaler
 from zeobind.src.models.models import get_model
-from zeobind.src.utils.utils import log_msg
+from zeobind.src.utils.logger import log_msg
 
 ##########################################
 ##### FILE PATHS AND OUTPUT DIRECTORY ####

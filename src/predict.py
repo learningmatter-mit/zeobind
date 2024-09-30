@@ -1,5 +1,7 @@
+from ast import literal_eval
 from copy import deepcopy
 from itertools import product
+import numpy as np 
 import json
 import multiprocessing
 import argparse
@@ -9,6 +11,7 @@ import joblib
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
+from zeobind.src.utils.utils import get_load_norm_bins
 
 from zeobind.src.utils.pred_tasks import (
     PREDICTION_TASK_DICT,
@@ -19,7 +22,6 @@ from zeobind.src.utils.pred_tasks import (
 )
 from zeobind.src.utils.utils import (
     PAIR_COLS,
-    log_msg,
     INPUT_SCALER_FILE,
     OUTPUT_SCALER_FILE,
     create_inputs,
@@ -27,6 +29,7 @@ from zeobind.src.utils.utils import (
     rescale_data,
     scale_data,
 )
+from zeobind.src.utils.logger import log_msg
 from zeobind.src.models.models import get_model
 
 
@@ -38,12 +41,12 @@ def set_model_path_and_type(kwargs, task):
         model_paths = kwargs["binary_models"]
         model_type = kwargs["binary_model_type"]
     elif task == MCLASS_TASK:
-        model_paths = kwargs["mclass_models"]
-        model_type = kwargs["mclass_model_type"]
+        model_paths = kwargs["loading_models"]
+        model_type = kwargs["loading_model_type"]
     return model_paths, model_type
 
 
-def single_model_preds(task, input_kwargs, condense=True):
+def single_model_preds(task, input_kwargs, condense=False):
     """
     Predicts on a single model.
 
@@ -60,26 +63,44 @@ def single_model_preds(task, input_kwargs, condense=True):
     kwargs["task"] = task
     kwargs["model_paths"], kwargs["model_type"] = set_model_path_and_type(kwargs, task)
 
+    log_msg("debug", kwargs["osda_prior_file"], kwargs["zeolite_prior_file"])
+
+    # Get list of framework-molecule pair identities
     if kwargs.get("full_matrix", True):
-        osda_priors = pd.read_pickle(kwargs["osda_prior_file"])
-        zeolite_priors = pd.read_pickle(kwargs["zeolite_prior_file"])
-        pairs = list(product(osda_priors.index, zeolite_priors.index))
+        if ".pkl" in kwargs["osda_prior_file"]:
+            osda_priors = pd.read_pickle(kwargs["osda_prior_file"])
+            osdas = osda_priors.index
+        else:
+            with open(kwargs["osda_prior_file"], "r") as f:
+                osdas = f.readlines() 
+            osdas = [o.strip() for o in osdas]
+        
+        if ".pkl" in kwargs["zeolite_prior_file"]:
+            zeos = pd.read_pickle(kwargs["zeolite_prior_file"]).index
+        else:
+            with open(kwargs["zeolite_prior_file"], "r") as f:
+                zeos = f.readlines() 
+            zeos = [z.strip() for z in zeos]
+
+        pairs = list(product(osdas, zeos))
+
     else:
         pairs = pd.read_csv(kwargs["pairs_file"], index_col=0)[PAIR_COLS].values.tolist()
+
     pairs = pd.DataFrame(pairs, columns=PAIR_COLS).set_index(PAIR_COLS)
-    X = create_inputs(kwargs, pairs.index)
+
+    # create inputs 
+    X = create_inputs(kwargs, pairs.index, save=True)
     kwargs["input_length"] = len(X.columns)
     log_msg("single_model_preds", "Number of pairs to predict on:", len(pairs))
 
     # apply scaling to prior
-    input_scaler = joblib.load(os.path.join(kwargs["output"], INPUT_SCALER_FILE))
-    X_scaled = input_scaler.transform(X)
-    with open(os.path.join(kwargs["output"], INPUT_SCALER_FILE), "r") as f:
+    with open(os.path.join(kwargs["saved_model"], INPUT_SCALER_FILE), "r") as f:
         input_scaler = json.load(f)
     X_scaled = scale_data(X, input_scaler)
 
     # make it torch friendly
-    X_scaled = torch.tensor(X_scaled, device=kwargs["device"]).float()
+    X_scaled = torch.tensor(X_scaled.astype("float32").values)
 
     # make it into a dataloader
     X_scaled_dataloader = DataLoader(
@@ -87,17 +108,15 @@ def single_model_preds(task, input_kwargs, condense=True):
     )
 
     # get model
-    if "mlp" in kwargs["model_type"]:
-        kwargs["l_sizes"] = [kwargs["input_length"]]
-        for i in range(kwargs["layers"]):
-            kwargs["l_sizes"].append(kwargs["neurons"])
     model = get_model(kwargs["model_type"], kwargs, kwargs["device"])
+    model.to(kwargs["device"])
 
     # predict
     y_preds = []
     with torch.no_grad():
         model.eval()
         for X_batch in X_scaled_dataloader:
+            X_batch = X_batch.to(kwargs["device"])
             y_preds.append(model(X_batch))
 
     # format outputs
@@ -111,19 +130,26 @@ def single_model_preds(task, input_kwargs, condense=True):
             truth_scaler = json.load(f)
         y_preds = rescale_data(y_preds, truth_scaler)
 
-    y_preds = pd.DataFrame(y_preds, columns=[kwargs["label"]], index=pairs.index)
+    if task == BINARY_TASK or task == MCLASS_TASK:
+        if condense: # save class instead of proba
+            log_msg("single_model_preds", f"Condensing probabilities to class for {task}")
+            y_preds = np.argmax(y_preds, axis=1)
+            if task == BINARY_TASK:
+                kwargs["label"] = "binding"
+            elif task == MCLASS_TASK:
+                kwargs["label"] = "load_norm_class"
+        else:
+            if task == BINARY_TASK:
+                kwargs["label"] = ["nb", "b"]
+            elif task == MCLASS_TASK:
+                _, bins_dict, _ = get_load_norm_bins()
+                kwargs["label"] = [f"{COL_DICT[MCLASS_TASK]}_{i}" for i in bins_dict.keys()]
 
-    # saving pred proba takes up too much space, so we will condense
-    if condense:
-        if task == MCLASS_TASK:        
-            y_preds = y_preds.idxmax(1).apply(lambda x: float(x[0].split('_')[-1])) # note: class number not actual loading
-        elif task == BINARY_TASK:
-            y_preds = y_preds.idxmax(1).apply(lambda x: 1 if x[0] == 'b' else 0)
-    
+    y_preds = pd.DataFrame(y_preds, columns=[kwargs["label"]], index=pairs.index)
     log_msg("single_model_preds", "Total time:", "{:.2f}".format((time.time() - single_start_time) / 60), "mins")
     return y_preds
 
-def ensemble_preds(task, kwargs, condense=True):
+def ensemble_preds(task, kwargs, condense=False):
     '''
     Saves a single CSV file where columns are labelled by model number.
     condense: If True, saves the idxmax value instead of the probabilities.
@@ -152,7 +178,7 @@ def ensemble_preds(task, kwargs, condense=True):
     y_preds.columns = cols
     return y_preds
 
-def predict(files, kwargs, condense=True):
+def predict(files, kwargs, condense=False):
     """
     Make and save predictions. This loops over prediction tasks. 
 
@@ -182,12 +208,13 @@ def predict(files, kwargs, condense=True):
         task_kwargs = deepcopy(kwargs)
         task_obj = PREDICTION_TASK_DICT[task]()
         task_kwargs.update(task_obj.__dict__)
+        task_kwargs["model_paths"] = kwargs[f"{task.split('_')[0]}_models"]
 
 
         if not kwargs["ensemble"][task]:
-            y_preds = single_model_preds(task, kwargs, kwargs.get('condense', condense))
+            y_preds = single_model_preds(task, task_kwargs, task_kwargs.get('condense', condense))
         else:
-            y_preds = ensemble_preds(task, kwargs, kwargs.get('condense', condense))
+            y_preds = ensemble_preds(task, task_kwargs, task_kwargs.get('condense', condense))
 
         y_preds.reset_index(inplace=True)
         filename = f"{kwargs['output']}/{task}/{kwargs['filename']}"
@@ -200,10 +227,10 @@ def main(kwargs):
 
     # get list of osda and zeolite prior files for prediction
     kwargs["osda_prior_files"] = get_prior_files(
-        kwargs["osda_prior_files"], kwargs["osda_prior_folder"]
+        kwargs["osda_prior_files"], kwargs["osda_prior_folders"]
     )
     kwargs["zeolite_prior_files"] = get_prior_files(
-        kwargs["zeolite_prior_files"], kwargs["zeolite_prior_folder"]
+        kwargs["zeolite_prior_files"], kwargs["zeolite_prior_folders"]
     )
 
     # get zeolite-osda pairs if not full matrix
@@ -233,7 +260,7 @@ def main(kwargs):
         kwargs['ensemble'][BINARY_TASK] = True
     if len(kwargs['energy_models']) > 1:
         kwargs['ensemble'][ENERGY_TASK] = True
-    if len(kwargs['mclass_models']) > 1:
+    if len(kwargs['loading_models']) > 1:
         kwargs['ensemble'][MCLASS_TASK] = True
 
     # task settings 
@@ -263,18 +290,20 @@ if __name__ == "__main__":
     parser.add_argument("--binary_model_type", help="Binary model type", choices=["xgb_classifier", "mlp_classifier"])
     parser.add_argument("--energy_models", nargs='+', help="Energy regression model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made")
     parser.add_argument("--energy_model_type", help="Energy model type", choices=["xgb_regressor", "mlp_regressor"])
-    parser.add_argument("--mclass_models", nargs='+', help="Loading multiclassification model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made")
-    parser.add_argument("--mclass_model_type", help="Loading model type", choices=["xgb_classifier", "mlp_classifier"])
+    parser.add_argument("--loading_models", nargs='+', help="Loading multiclassification model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made")
+    parser.add_argument("--loading_model_type", help="Loading model type", choices=["xgb_classifier", "mlp_classifier"])
 
     # set up 
-    parser.add_argument("--device", help="Device", default=None)
+    parser.add_argument("--device", help="Device", default="cpu")
     parser.add_argument("--num_processes", help="Number of processes. If more than 1, prediction is parallelised.", type=int, default=1)
 
     # input
     parser.add_argument("--osda_prior_folders", nargs="+", help="OSDA input folders", default=[])
-    parser.add_argument("--zeolite_prior_folders", nargs="+", help="Zeolite input folders", default=[])
     parser.add_argument("--osda_prior_files", nargs="+", help="OSDA input files", default=[])
+    parser.add_argument("--osda_prior_map", help="OSDA features to use", default=None)
+    parser.add_argument("--zeolite_prior_folders", nargs="+", help="Zeolite input folders", default=[])
     parser.add_argument("--zeolite_prior_files", nargs="+", help="Zeolite input files", default=[])
+    parser.add_argument("--zeolite_prior_map", help="Zeolite features to use", default=None)
     parser.add_argument("--full_matrix", help="Predict on full matrix. If this is True, pairs_files is ignored", action="store_true")
     parser.add_argument("--pairs_files", nargs="+", help="File containing framework-molecule pairs. This is used if full_matrix is False", default=[])
     parser.add_argument("--pairs_folders", nargs="+", help="Folders containing framework-molecule pairs. This is used if full_matrix is False", default=[])
@@ -287,4 +316,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     kwargs = args.__dict__
+    try:
+        kwargs["device"] = literal_eval(kwargs["device"])
+    except ValueError:
+        pass
     main(kwargs)

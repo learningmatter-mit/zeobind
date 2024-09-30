@@ -15,6 +15,7 @@ from rdkit import Chem
 from rdkit.Chem import RemoveAllHs, Draw
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, QuantileTransformer
 from torch.utils.data import Dataset
+from zeobind.src.utils.logger import log_msg
 from zeobind.src.utils.default_utils import (
     LOAD_NORM_BINS_FILE,
     MPL_FONTS_DIR,
@@ -29,15 +30,8 @@ SCALERS = dict(
     minmax=MinMaxScaler(),
     quantile_normal=QuantileTransformer(output_distribution="normal"),
 )
-INPUT_SCALER_FILE = "ip_scaler.gz"
-OUTPUT_SCALER_FILE = "op_scaler.gz"
-
-
-def log_msg(header, *ls_statements):
-    t = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{t} {header}] ", end="")
-    print(*ls_statements)
-    sys.stdout.flush()
+INPUT_SCALER_FILE = "input_scaling.json"
+OUTPUT_SCALER_FILE = "truth_scaling.json"
 
 
 def sort_by(x, idx=2):
@@ -56,7 +50,7 @@ def get_competition(mat):
     return competition
 
 
-def create_inputs(kwargs, indices):
+def create_inputs(kwargs, indices, save=False):
     """
     Args:
     kwargs (dict): Dictionary of arguments.
@@ -67,22 +61,43 @@ def create_inputs(kwargs, indices):
     osda_indices = indices.get_level_values(PAIR_COLS[0]).to_list()
     zeolite_indices = indices.get_level_values(PAIR_COLS[1]).to_list()
 
-    osda_inputs = process_prior_file(kwargs["osda_prior_file"])
+    # get prior file names and check if they already exist. If they do, load them. If not, process them.
+
+    osda_filename = f"{kwargs['output']}/{os.path.basename(kwargs['osda_prior_file'])}"
+    if not ".pkl" in osda_filename:
+        osda_filename += ".pkl"
+    if os.path.exists(osda_filename):
+        kwargs["osda_prior_file"] = osda_filename
+        save = False 
+    
+    zeolite_filename = f"{kwargs['output']}/{os.path.basename(kwargs['zeolite_prior_file'])}"
+    if not ".pkl" in zeolite_filename:
+        zeolite_filename += ".pkl"
+    if os.path.exists(zeolite_filename):
+        kwargs["zeolite_prior_file"] = zeolite_filename
+        save = False
+
+    osda_inputs = process_prior_file(kwargs["osda_prior_file"], is_zeolite=False)
     zeolite_inputs = process_prior_file(kwargs["zeolite_prior_file"])
 
     if kwargs.get("osda_prior_map"):
         with open(kwargs["osda_prior_map"], "r") as f:
             cols = json.load(f)
-        osda_inputs = osda_inputs[cols]
+        osda_inputs = osda_inputs[cols.keys()]
     if kwargs.get("zeolite_prior_map"):
         with open(kwargs["zeolite_prior_map"], "r") as f:
             cols = json.load(f)
-        zeolite_inputs = zeolite_inputs[cols]
+        zeolite_inputs = zeolite_inputs[cols.keys()]
 
-    osda_inputs = osda_inputs.loc[osda_indices]
-    zeolite_inputs = zeolite_inputs.loc[zeolite_indices]
+    if save:
+        osda_inputs.to_pickle(osda_filename)
+        zeolite_inputs.to_pickle(zeolite_filename)
 
-    return pd.concat([osda_inputs, zeolite_inputs], axis=1)
+    osda_inputs = osda_inputs.loc[osda_indices].reset_index(drop=True)
+    zeolite_inputs = zeolite_inputs.loc[zeolite_indices].reset_index(drop=True)
+    inputs = pd.concat([osda_inputs, zeolite_inputs], axis=1).set_index(indices)
+
+    return inputs
 
 
 def process_prior_file(file, is_zeolite=True):

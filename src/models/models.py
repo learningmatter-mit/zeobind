@@ -12,10 +12,10 @@ import socket
 import torch
 import yaml
 from zeobind.src.utils.default_utils import RESULTS_FILE
+from zeobind.src.utils.logger import log_msg
 from zeobind.src.utils.utils import (
     PAIR_COLS,
     MultiTaskTensorDataset,
-    log_msg,
     INPUT_SCALER_FILE,
     OUTPUT_SCALER_FILE,
     SCALERS,

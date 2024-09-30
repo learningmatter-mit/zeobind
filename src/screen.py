@@ -6,8 +6,8 @@ import multiprocessing
 import os
 import time
 import pandas as pd
-from zeobind.src.utils.utils import get_competition, log_msg
-
+from zeobind.src.utils.utils import get_competition
+from zeobind.src.utils.logger import log_msg
 class OSDAScreener:
     def __init__(
         self,
@@ -120,7 +120,7 @@ class OSDAScreener:
         Input:
         - files: Tuple of (BE means, BE stds, molecule features).
         """
-        log_msg("filter_single", f"Filtering {files[0]}...")
+        log_msg("filter_single", f"Filtering {files[2]}...")
         bem_file, bes_file, opr_file = files
         bem = pd.read_csv(bem_file, index_col=0)
         bes = pd.read_csv(bes_file, index_col=0)
@@ -218,15 +218,16 @@ if __name__ == "__main__":
     parser.add_argument("--remove_neighboring_n", action="store_true", help="Remove molecules with neighboring nitrogens.")
     parser.add_argument("--remove_stereocenters", action="store_true", help="Remove molecules with stereocenters.")
     parser.add_argument("--num_c_between_n_min", type=int, help="Minimum number of carbons between nitrogens.", default=-1)
+    parser.add_argument("--nfiles", type=int, help="Number of molecule files to screen. There are 55 monoquaternary and 180 diquaternary files.", required=True, choices=[180, 55], default=55)
 
     args = parser.parse_args()
 
     be_mean_files = [
-        f"{args.preds_dir}/formatted_be/{args.ofile_root}_{i}_{args.zfile_root}_preds_bemat_mean_{args.charge}.csv"
+        f"{args.preds_dir}/formatted_be/{args.ofile_root}_{i}_{args.zfile_root}_0_preds_bemat_mean_{args.charge}.csv"
         for i in range(args.nfiles)
     ]
     be_std_files = [
-        f"{args.preds_dir}/formatted_be/{args.ofile_root}_{i}_{args.zfile_root}_preds_bemat_std_{args.charge}.csv"
+        f"{args.preds_dir}/formatted_be/{args.ofile_root}_{i}_{args.zfile_root}_0_preds_bemat_std_{args.charge}.csv"
         for i in range(args.nfiles)
     ]
     oprior_files = [f"{args.opriors_dir}/osda_priors_{i}.pkl" for i in range(args.nfiles)]
