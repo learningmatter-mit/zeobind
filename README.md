@@ -11,7 +11,7 @@ mamba create -f environment.yml
 mamba activate zeobind
 ```
 
-The data used in the paper, dataset of hypothetical molecules, as well as predictions across all the IZA framework - hypothetical molecule chemical space, can be found at Materials Data Fac ility. [TODO insert MDF DOI] Download the data and place it in the `data` directory.
+The data used in the paper, dataset of hypothetical molecules, as well as predictions across all the IZA framework - hypothetical molecule chemical space, can be found at [Materials Data Facility](https://materialsdatafacility.org/detail/2cd2e3f3-12d3-4cd9-8ef0-efd91c0f8e3a-1.0?type=dataset). Download the data and place it in the `zeobind/data` directory.
 
 ## Usage 
 
