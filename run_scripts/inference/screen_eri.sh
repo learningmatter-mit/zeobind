@@ -26,7 +26,7 @@ python zeobind/src/screen.py \
     --vol_lower 200 \
     --vol_upper 300 \
     --rot_lower 0 \
-    --rot_upper 20 \
+    --rot_upper 5 \
     --sim_cutoff 0.8 \
     --sa_cutoff 5 \
     --px_cutoff 100 \

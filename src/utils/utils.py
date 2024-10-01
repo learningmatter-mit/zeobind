@@ -125,7 +125,7 @@ def process_prior_file(file, is_zeolite=True):
             return priors
 
 
-def get_load_norm_bins(file=LOAD_NORM_BINS_FILE):  # TODO: update filepath
+def get_load_norm_bins(file=LOAD_NORM_BINS_FILE):  
     """
     Get loading related bins for loading multilassification task.
 
