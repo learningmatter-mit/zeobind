@@ -5,28 +5,13 @@ import random
 import torch
 import os
 import yaml
-from zeobind.src.models.xgb import XGBTrainer
-from zeobind.src.models.mlp import MLPTrainer
+from zeobind.src.models.models import XGBTrainer, MLPTrainer, MODELS
 from utils.pred_tasks import PREDICTION_TASK_DICT
 from utils.logger import log_msg
 
 
 def preprocess(args: argparse.Namespace) -> dict:
-    # Default parameters TODO: remove because these were for compatibility with the old code
-    kwargs = {
-        "batch_norm": False,
-        "softmax": True,
-        "lr": 1e-2,
-        "load_models": None,
-        "first_class": 0,
-    }
-
-    # Load config file
-    config_file = args.__dict__["config"]
-    with open(config_file, "rb") as file:
-        kwargs_config = yaml.load(file, Loader=yaml.Loader)
-        kwargs.update(kwargs_config)
-    kwargs["config"] = config_file
+    kwargs = vars(args)
 
     # Format output folder name 
     if os.path.isdir(kwargs["output"]):
@@ -40,6 +25,7 @@ def preprocess(args: argparse.Namespace) -> dict:
         )
         kwargs["output"] = kwargs["output"] + now
     os.makedirs(kwargs["output"], exist_ok=True)
+    kwargs["run"] = kwargs["output"].split("/")[-1]
 
     # Check device and threads
     if "device" not in kwargs.keys():
@@ -59,16 +45,11 @@ def preprocess(args: argparse.Namespace) -> dict:
     log_msg("preprocess", "Number of threads:", torch_threads, os_threads)
 
     # Set seed
-    if not kwargs.get("seed"):
-        kwargs["seed"] = 422
-        log_msg("preprocess", "Seed not set, using default seed 422")
     set_seeds(kwargs["seed"])
 
     # Set prediction task parameters 
     pred_task = PREDICTION_TASK_DICT[kwargs["task"]]
     kwargs.update(pred_task().__dict__)
-
-    # Dump arguments TODO remove this because it was useful for debugging but messy 
 
     log_msg("preprocess", "Output folder:", kwargs["output"])
     return kwargs
@@ -84,11 +65,12 @@ def set_seeds(seed):
 
 TRAINER_DICT = dict(
     xgb=XGBTrainer,
-    nn=MLPTrainer,
+    mlp=MLPTrainer,
 )
 
+
 def get_trainer(kwargs):
-    return TRAINER_DICT[kwargs["model_type"]](kwargs)
+    return TRAINER_DICT[kwargs["trainer_type"]](kwargs)
 
 
 if __name__ == "__main__":
@@ -111,7 +93,8 @@ if __name__ == "__main__":
     parser.add_argument("--drop_fws", nargs="+", help="frameworks to drop", default=[])
 
     # model and training parameters
-    parser.add_argument("--model_type", type=str, help="model type", choices=["xgb", "nn"], default="nn")
+    parser.add_argument("--trainer_type", type=str, help="model type", default="mlp", choices=TRAINER_DICT.keys())
+    parser.add_argument("--model_type", type=str, help="model type", default="mlp_classifier", choices=MODELS.keys())
     parser.add_argument("--loss_1", type=str, help="loss 1", default="celoss")
     parser.add_argument("--loss_2", type=str, help="loss 2", default=None)
     parser.add_argument("--weight_1", type=float, help="weight 1", default=1.0)
@@ -119,24 +102,26 @@ if __name__ == "__main__":
     # parser.add_argument("l_sizes", type=int, nargs="+", help="layer sizes", default=[])
     parser.add_argument("--input_scaler", type=str, help="input scaler", default="standard")
     parser.add_argument("--optimizer", type=str, help="optimizer", default="adam")
-    parser.add_argument("--scheduler", type=str, help="scheduler", default=False)
+    parser.add_argument("--scheduler", action="store_true", help="scheduler")
     parser.add_argument("--epochs", type=int, help="epochs", default=500)
     parser.add_argument("--batch_size", type=int, help="batch size", default=256)
     parser.add_argument("--patience", type=int, help="patience", default=10)
     parser.add_argument("--min_delta", type=float, help="min delta", default=0.05)
     parser.add_argument("--drop_last", action="store_true", help="drop last")
     parser.add_argument("--scaler", type=str, help="output scaler", default=None)
-    parser.add_argument("--lr", type=float, help="learning rate", default=1e-3)
+    parser.add_argument("--lr", type=float, help="learning rate", default=1e-2)
     parser.add_argument("--lr_patience", type=int, help="lr patience", default=20)
+    parser.add_argument("--input_length", type=int, help="input length", default=35)
     parser.add_argument("--layers", type=int, help="layers", default=2)
     parser.add_argument("--neurons", type=int, help="neurons", default=512)
     parser.add_argument("--batch_norm", action="store_true", help="batch norm")
-    parser.add_argument("--softmax", action="store_true", help="softmax")
+    parser.add_argument("--softmax", action="store_true", help="softmax for classification tasks")
     parser.add_argument("--dropout", type=float, help="dropout", default=0.4)
     parser.add_argument("--num_classes", type=int, help="number of classes", default=2)
     parser.add_argument("--task", help="prediction task", choices=PREDICTION_TASK_DICT.keys(), default="binary")
     parser.add_argument("--shuffle_batch", action="store_true", help="shuffle batch")
     parser.add_argument("--save", action="store_true", help="save ground truth, predictions, and inputs at end of experiment.")
+    parser.add_argument("--save_model", action="store_true", help="save model")
 
     # hyperparameter tuning 
     parser.add_argument("--tune", action="store_true", help="tune hyperparameters")

@@ -21,7 +21,7 @@ python zeobind/src/predict.py \
     --energy_model_type mlp_regressor \
     --loading_models ${mclass_models[@]} \
     --loading_model_type mlp_classifier \
-    --device 2 \
+    --device "cuda:1" \
     --num_processes 1 \
     --osda_prior_folders null \
     --osda_prior_files $repo_dir/run_scripts/inference/example_osda \

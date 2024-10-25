@@ -11,9 +11,9 @@ cd $parent_dir
 
 task=energy
 run=0
-split=0
+split=1
 python zeobind/src/train.py \
-    --output $run_output_dir/$task/$run/ \
+    --output $run_output_dir/template/$task/$run \
     --seed 12934 \
     --device 2 \
     --osda_prior_file $data_dir/datasets/training_data/osda_priors_0.pkl \
@@ -21,9 +21,10 @@ python zeobind/src/train.py \
     --osda_prior_map $repo_dir/src/configs/osda_v1_phys.json \
     --zeolite_prior_map $repo_dir/src/configs/zeolite_v1_phys_short.json \
     --truth $data_dir/datasets/training_data/training_data.csv \
-    --split_by smiles \
+    --split_by osda \
     --split_folder $data_dir/datasets/training_data/splits/$split/ \
-    --model_type nn \
+    --trainer_type mlp \
+    --model_type mlp_regressor \
     --input_scaler standard \
     --optimizer adam \
     --epochs 500 \
@@ -33,6 +34,7 @@ python zeobind/src/train.py \
     --scaler standard \
     --loss_1 mse \
     --lr 0.00005 \
+    --input_length 35 \
     --layers 4 \
     --neurons 256 \
     --batch_norm false \

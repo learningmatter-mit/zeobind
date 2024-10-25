@@ -31,7 +31,7 @@ bash run_scripts/inference/screen_cha.sh
 If you have a new set of molecules you would like to predict on, an example bash script can be found at `run_scripts/predict.sh`.
 
 ```bash
-bash run_scripts/predict.sh
+bash run_scripts/inference/predict.sh
 ```
 
 

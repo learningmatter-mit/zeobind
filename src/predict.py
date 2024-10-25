@@ -316,8 +316,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     kwargs = args.__dict__
-    try:
-        kwargs["device"] = literal_eval(kwargs["device"])
-    except ValueError:
-        pass
     main(kwargs)

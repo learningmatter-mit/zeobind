@@ -9,41 +9,47 @@ data_dir=$repo_dir/data
 run_output_dir=$repo_dir/data/runs
 cd $parent_dir 
 
-task=binary
+task=binary_classification
 run=0
-split=0
+split=1
 python zeobind/src/train.py \
-    --output $run_output_dir/$task/$run/ \
+    --output $run_output_dir/template/$task/$run \
     --seed 12934 \
-    --device 2 \
+    --device "cuda" \
     --osda_prior_file $data_dir/datasets/training_data/osda_priors_0.pkl \
     --zeolite_prior_file $data_dir/datasets/training_data/zeolite_priors_0.pkl \
     --osda_prior_map $repo_dir/src/configs/osda_v1_phys.json \
     --zeolite_prior_map $repo_dir/src/configs/zeolite_v1_phys_short.json \
     --truth $data_dir/datasets/training_data/training_data.csv \
-    --split_by smiles \
+    --split_by osda \
     --split_folder $data_dir/datasets/training_data/splits/$split/ \
-    --model_type nn \
+    --trainer_type mlp \
+    --model_type mlp_classifier \
     --input_scaler standard \
     --optimizer adam \
-    --epochs 500 \
+    --epochs 1 \
     --batch_size 256 \
     --patience 10 \
     --min_delta 0.05 \
     --loss_1 celoss \
     --lr 0.0001 \
+    --input_length 35 \
     --layers 2 \
     --neurons 512 \
-    --batch_norm false \
-    --softmax false \
     --dropout 0.4 \
     --num_classes 2 \
     --task $task \
-    --scheduler false \
     --lr_patience 20 \
-    --early_stopping false \
-    --shuffle_batch true \
-    --save_truths false \
-    --save_preds false \
-    --save_ips false \
-    --save_mask false \
+    --shuffle_batch \
+    --save_model \
+    --save \
+
+    # --batch_norm \
+    # --softmax \
+    # --scheduler \
+
+    # --save_preds false \
+    # --save_ips false \
+    # --save_mask false \
+    # --early_stopping false \
+    # --save_truths false \

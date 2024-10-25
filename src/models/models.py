@@ -11,6 +11,7 @@ from sigopt import Connection
 import socket
 import torch
 import yaml
+from zeobind.src.utils.loss import get_loss_fn
 from zeobind.src.utils.default_utils import RESULTS_FILE
 from zeobind.src.utils.logger import log_msg
 from zeobind.src.utils.utils import (
@@ -50,20 +51,27 @@ def get_model(model_type, kwargs, device="cpu"):
     - model: the model
     """
     # saved model
-    if kwargs["saved_model"]:
+    if kwargs.get("saved_model"):
         if "xgb" in model_type:
             model = MODELS[model_type]
             model.load_model(f"{kwargs['saved_model']}/{XGB_MODEL_FILE}")
         elif "mlp" in model_type:
-            saved_dict = torch.load(f"{kwargs['saved_model']}/{MLP_MODEL_FILE}")
+            saved_dict = torch.load(f"{kwargs['saved_model']}/{MLP_MODEL_FILE}", map_location=device)
             model = MODELS[model_type](**saved_dict["model_args"])
             model.load_state_dict(saved_dict["model_state_dict"])
         else:
             raise ValueError(f"[get_model] Invalid model type: {model_type}")
         log_msg("get_model", f"Loaded model\n{model}")
-        return model
+        return model, saved_dict
 
     # new model
+    if "mlp" in model_type:
+        kwargs["l_sizes"] = get_l_sizes(
+            kwargs["input_length"],
+            kwargs["layers"],
+            kwargs["neurons"]
+        )
+
     model_argnames = MODELS[model_type].__init__.__code__.co_varnames
     model_kwargs = {k: v for k, v in kwargs.items() if k in model_argnames}
     model = MODELS[model_type](**model_kwargs)
@@ -72,12 +80,25 @@ def get_model(model_type, kwargs, device="cpu"):
         model.to(device)
 
     log_msg("get_model", f"Loaded model\n{model}")
-    return model
+    return model, model_kwargs
 
+
+def get_l_sizes(input_length, layers, neurons):
+    l_sizes = [input_length]
+    for _ in range(layers):
+        l_sizes.append(neurons)
+    return l_sizes
+        
 
 class Trainer:
     def __init__(self, kwargs):
         self.kwargs = kwargs
+        self.loss_fn = get_loss_fn(
+            kwargs["loss_1"],
+            kwargs.get("loss_2", None),
+            kwargs.get("weight_1", 1.0),
+            kwargs.get("weight_2", 0.0),
+        )        
 
     def get_model(self, model_kwargs=None):
         """If model_kwargs are provided, they override the model parameters specified in self.kwargs."""
@@ -86,7 +107,7 @@ class Trainer:
         model, model_kwargs = get_model(
             self.kwargs["model_type"], model_kwargs, self.kwargs["device"]
         )
-        self.model_kwargs = model_kwargs
+        self.model_args = model_kwargs
         return model
 
     def _train(self):
@@ -101,17 +122,17 @@ class Trainer:
         start = time.time()
 
         # Load data
-        truth = pd.read_csv(self.kwargs["truth"])
-        all_osdas = sorted(set(truth[PAIR_COLS[0]]))
-        all_zeolites = sorted(set(truth[PAIR_COLS[1]]))
+        self.truth = pd.read_csv(self.kwargs["truth"])
+        all_osdas = sorted(set(self.truth[PAIR_COLS[0]]))
+        all_zeolites = sorted(set(self.truth[PAIR_COLS[1]]))
         log_msg("train", "Number of molecules:", len(all_osdas))
         log_msg("train", "Number of zeolites:", len(all_zeolites))
-        truth = self.truth.set_index(PAIR_COLS)
+        self.truth = self.truth.set_index(PAIR_COLS)
         self.label = self.kwargs["label"]
-        truth = truth[self.label]
+        self.truth = self.truth[self.label]
 
         # Load features
-        X = create_inputs(self.kwargs, truth.index)
+        X = create_inputs(self.kwargs, self.truth.index)
         self.kwargs["input_length"] = X.shape[1]
 
         # Split data
@@ -120,8 +141,12 @@ class Trainer:
         splits = dict()
         if split_folder:
             for split in ["train", "val", "test"]:
+                if split_by == "osda":
+                    file_root = "smiles"
+                elif split_by == "zeolite":
+                    file_root = "fws"
                 splits[split] = np.load(
-                    os.path.join(self.kwargs["split_folder"], f"{split_by}_{split}.npy")
+                    os.path.join(self.kwargs["split_folder"], f"{file_root}_{split}.npy")
                 ).tolist()
         else:
             rng = np.random.default_rng(self.kwargs["seed"])
@@ -166,13 +191,13 @@ class Trainer:
         splits[split] = sorted(splits[split])
 
         if split_by == "osda":
-            truth = truth.reset_index(PAIR_COLS[1])
+            self.truth = self.truth.reset_index(PAIR_COLS[1])
         else:
-            truth = truth.reset_index(PAIR_COLS[0])
+            self.truth = self.truth.reset_index(PAIR_COLS[0])
         truths = dict()
         for split in ["train", "val", "test"]:
             truths[split] = (
-                truth[truth.index.isin(splits[split])]
+                self.truth[self.truth.index.isin(splits[split])]
                 .reset_index()
                 .set_index(PAIR_COLS)
             )
@@ -184,7 +209,6 @@ class Trainer:
             truths["val"].size,
             truths["test"].size,
         )
-        log_msg("train", "Note that by default, the data is not shuffled.")
         if self.kwargs.get("shuffle_data", False):
             log_msg("train", "Data is shuffled.")
             for split in ["train", "val", "test"]:
@@ -207,9 +231,9 @@ class Trainer:
 
         # Scale inputs
         X = dict(
-            X_train=X.loc[truths["train"].index],
-            X_val=X.loc[truths["val"].index],
-            X_test=X.loc[truths["test"].index],
+            train=X.loc[truths["train"].index],
+            val=X.loc[truths["val"].index],
+            test=X.loc[truths["test"].index],
         )
         if self.kwargs.get("ip_scaler", None):
             self.ip_scaler = SCALERS[self.kwargs["ip_scaler"]]()
@@ -225,7 +249,7 @@ class Trainer:
         # Further processing
         self.X, self.truths = self.process(X, truths)
         prep_time = time.time() - start
-        log_msg("train", f"Preprocessing time: {prep_time}seconds")
+        log_msg("train", f"Preprocessing time: {prep_time} seconds")
 
         # Hyperparameter tuning
         if self.kwargs["tune"]:
@@ -338,6 +362,9 @@ class Trainer:
         with open(os.path.join(self.kwargs["output"], "final_kwargs.yml"), "w") as f:
             yaml.dump(self.kwargs, f)
 
+        # Save model
+        if self.kwargs.get("save_model"):
+            self.save_model(self.kwargs["output"])
         log_msg("train", "Output folder:", self.kwargs["output"])
         log_msg("train", "Done")
 
@@ -350,9 +377,9 @@ class Trainer:
     def write_results(self):
         dp = 8
         newline = ""
-        newline += self.kwargs["config"]
+        newline += self.kwargs["task"]
         newline += ","
-        newline += self.kwargs["output"]
+        newline += self.kwargs["run"]
         newline += ","
         newline += str(round(self.train_loss, dp))
         newline += ","
@@ -477,15 +504,13 @@ class Regressor(nn.Module):
 class MLPTrainer(Trainer):  
     def __init__(self, kwargs):
         super().__init__(kwargs)
+        self.scheduler = None 
 
     def _train(self):
         """
         Initialise the model, and run the training loop.
         Uses self.train_kwargs, not self.kwargs.
         """
-        # train_kwargs["l_sizes"] = get_kwargs_l_sizes(
-        #         train_kwargs, input_length=kwargs["input_length"]
-        #     )
 
         params = self.model.parameters()
         self.optimizer = OPTIMIZERS[self.train_kwargs["optimizer"]](
@@ -549,7 +574,8 @@ class MLPTrainer(Trainer):
     def train_single_epoch(self):
         losses = []
         self.model.train()
-        for X, y, _ in self.dataloaders["train"]:
+        for i, (X, y, _) in enumerate(self.dataloaders["train"]):
+            # log_msg("train_single_epoch", f"Batch {i}")
             X = X.to(self.train_kwargs["device"])
             y = y.to(self.train_kwargs["device"])
             preds = self.model(X)
@@ -565,14 +591,15 @@ class MLPTrainer(Trainer):
         preds = []
         self.model.eval()
         with torch.no_grad():
-            for X, y, _ in self.dataloaders[split]:
+            for i, (X, y, _) in enumerate(self.dataloaders[split]):
+                # log_msg("evaluate", f"Batch {i}")
                 X = X.to(self.train_kwargs["device"])
                 y = y.to(self.train_kwargs["device"])
-                preds = self.model(X)
-                loss = self.loss_fn(preds, y)
+                pred = self.model(X)
+                loss = self.loss_fn(pred, y)
                 losses.append(loss.item())
                 if return_preds:
-                    preds.append(preds)
+                    preds.append(pred)
 
         if self.scheduler:
             self.scheduler.step(np.mean(losses))
@@ -587,9 +614,8 @@ class MLPTrainer(Trainer):
         self.dataloaders = dict()
         for split in ["train", "val", "test"]:
             indices = X[split].index.to_list()
-            indices = torch.tensor(indices)
-            X[split] = torch.tensor(X[split].value).float()
-            truths[split] = torch.tensor(truths[split].values).float()
+            X[split] = torch.tensor(X[split].values.astype('float64')).float()
+            truths[split] = torch.tensor(truths[split].values.astype('float64')).float()
 
             dataset = MultiTaskTensorDataset(X[split], truths[split], indices)
             self.dataloaders[split] = DataLoader(
