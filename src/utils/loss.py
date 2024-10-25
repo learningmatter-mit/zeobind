@@ -29,7 +29,10 @@ class BaseLoss(nn.Module):
         return yhat
 
     def loss(self, yhat, y):
-        return self.loss_fn(yhat, y)
+        try:
+            return self.loss_fn(yhat, y)
+        except Exception as e:
+            return self.loss_fn(yhat, y.long())
 
 
 class MSELoss(BaseLoss):
@@ -53,7 +56,7 @@ class CrossEntropyLoss(BaseLoss):
     def format_y(self, y):
         if type(y) != torch.Tensor:
             y = torch.tensor(y, device=self.device)
-        return y.squeeze().long()
+        return y.squeeze()
 
 
 LOSS_DICT = dict(

@@ -200,7 +200,7 @@ class ConformerGenerator(object):
         """
         Generates conformers
 
-        Note  the number max_generated _conformers required is related to the
+        Note  the number max_generated_conformers required is related to the
         number of rotatable bonds
         """
         self.mol = AddHs(self.mol, addCoords=True)

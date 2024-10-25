@@ -26,9 +26,8 @@ from zeobind.src.utils.default_utils import DEFAULT_ZEOLITE_PRIOR_FILE
 PAIR_COLS = ["SMILES", "Zeolite"]
 
 SCALERS = dict(
-    standard=StandardScaler(),
-    minmax=MinMaxScaler(),
-    quantile_normal=QuantileTransformer(output_distribution="normal"),
+    standard=StandardScaler,
+    minmax=MinMaxScaler,
 )
 INPUT_SCALER_FILE = "input_scaling.json"
 OUTPUT_SCALER_FILE = "truth_scaling.json"

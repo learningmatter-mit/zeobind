@@ -25,7 +25,7 @@ python zeobind/src/train.py \
     --split_folder $data_dir/datasets/training_data/splits/$split/ \
     --trainer_type mlp \
     --model_type mlp_classifier \
-    --input_scaler standard \
+    --ip_scaler standard \
     --optimizer adam \
     --epochs 1 \
     --batch_size 256 \
@@ -43,13 +43,3 @@ python zeobind/src/train.py \
     --shuffle_batch \
     --save_model \
     --save \
-
-    # --batch_norm \
-    # --softmax \
-    # --scheduler \
-
-    # --save_preds false \
-    # --save_ips false \
-    # --save_mask false \
-    # --early_stopping false \
-    # --save_truths false \

@@ -9,13 +9,13 @@ data_dir=$repo_dir/data
 run_output_dir=$repo_dir/data/runs
 cd $parent_dir 
 
-task=mclass
+task=loading_classification
 run=0
 split=1
 python zeobind/src/train.py \
     --output $run_output_dir/template/$task/$run \
     --seed 12934 \
-    --device 2 \
+    --device "cuda" \
     --osda_prior_file $data_dir/datasets/training_data/osda_priors_0.pkl \
     --zeolite_prior_file $data_dir/datasets/training_data/zeolite_priors_0.pkl \
     --osda_prior_map $repo_dir/src/configs/osda_v1_phys.json \
@@ -25,9 +25,9 @@ python zeobind/src/train.py \
     --split_folder $data_dir/datasets/training_data/splits/$split/ \
     --trainer_type mlp \
     --model_type mlp_classifier \
-    --input_scaler standard \
+    --ip_scaler standard \
     --optimizer adam \
-    --epochs 500 \
+    --epochs 1 \
     --batch_size 256 \
     --patience 10 \
     --min_delta 0.05 \
@@ -39,16 +39,10 @@ python zeobind/src/train.py \
     --input_length 35 \
     --layers 2 \
     --neurons 512 \
-    --batch_norm false \
-    --softmax false \
     --dropout 0.4 \
-    --num_classes 2 \
+    --num_classes 46 \
     --task $task \
-    --scheduler false \
     --lr_patience 20 \
-    --early_stopping false \
-    --shuffle_batch true \
-    --save_truths false \
-    --save_preds false \
-    --save_ips false \
-    --save_mask false \
+    --shuffle_batch \
+    --save_model \
+    --save \

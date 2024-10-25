@@ -80,7 +80,7 @@ if __name__ == "__main__":
     # set up 
     parser.add_argument("--output", type=str, help="output folder", required=True)
     parser.add_argument("--seed", type=int, help="seed", default=12934)
-    parser.add_argument("--device", help="device", choices=["cpu", "cuda"], default="cuda")
+    parser.add_argument("--device", help="device", default="cuda")
 
     # data
     parser.add_argument("--osda_prior_file", type=str, help="osda prior file", default=None)
@@ -100,7 +100,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight_1", type=float, help="weight 1", default=1.0)
     parser.add_argument("--weight_2", type=float, help="weight 2", default=0.0)
     # parser.add_argument("l_sizes", type=int, nargs="+", help="layer sizes", default=[])
-    parser.add_argument("--input_scaler", type=str, help="input scaler", default="standard")
+    parser.add_argument("--ip_scaler", type=str, help="input scaler", default="standard")
+    parser.add_argument("--op_scaler", type=str, help="output scaler", default="standard")
     parser.add_argument("--optimizer", type=str, help="optimizer", default="adam")
     parser.add_argument("--scheduler", action="store_true", help="scheduler")
     parser.add_argument("--epochs", type=int, help="epochs", default=500)

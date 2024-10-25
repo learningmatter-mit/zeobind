@@ -219,10 +219,16 @@ class Trainer:
         # Scale truth
         if self.kwargs.get("op_scaler", None):
             self.op_scaler = SCALERS[self.kwargs["op_scaler"]]()
-            self.op_scaler.fit(truths["train"][self.label])
+            to_scale = truths["train"][self.label]
+            if len(to_scale.shape) == 1:
+                to_scale = to_scale.values.reshape(-1, 1)
+            self.op_scaler.fit(to_scale)
 
             for split in ["train", "val", "test"]:
-                scaled = self.op_scaler.transform(truths[split][self.label])
+                to_scale = truths[split][self.label].values 
+                if len(to_scale.shape) == 1:
+                    to_scale = to_scale.reshape(-1, 1)
+                scaled = self.op_scaler.transform(to_scale)
                 truths[split][self.label] = pd.DataFrame(
                     scaled, index=truths[split].index, columns=[self.label]
                 )
@@ -239,10 +245,10 @@ class Trainer:
             self.ip_scaler = SCALERS[self.kwargs["ip_scaler"]]()
             self.ip_scaler.fit(X["train"])
             for split in ["train", "val", "test"]:
-                X[f"X_{split}"] = pd.DataFrame(
-                    self.ip_scaler.transform(X[f"X_{split}"]),
-                    index=X[f"X_{split}"].index,
-                    columns=X[f"X_{split}"].columns,
+                X[f"{split}"] = pd.DataFrame(
+                    self.ip_scaler.transform(X[f"{split}"]),
+                    index=X[f"{split}"].index,
+                    columns=X[f"{split}"].columns,
                 )
             save_scaler(self.ip_scaler, self.kwargs["ip_scaler"], self.kwargs["output"], INPUT_SCALER_FILE)
 
@@ -326,37 +332,52 @@ class Trainer:
         self.train_kwargs = deepcopy(self.kwargs)
         self.model = self.get_model(self.train_kwargs)
         self._train()
-        train_time = time.time() - prep_time
+        train_time = time.time() - start - prep_time
         log_msg("train", f"Time to train: {train_time} seconds")
 
         # Evaluate on all splits
         self.preds = dict()
+        self.ys = dict()
         for split in ["train", "val", "test"]:
-            loss, preds = self.evaluate(split, True)
+            loss, preds, ys, idx = self.evaluate(split, True) 
             self.__setattr__(f"{split}_loss", loss)
-            self.preds[split] = preds
+            self.preds[split] = pd.DataFrame(
+                preds, 
+                index=pd.MultiIndex.from_tuples(idx, names=PAIR_COLS),
+                columns=self.kwargs["output_label"],
+                )
+            self.ys[split] = pd.DataFrame(
+                ys, 
+                index=pd.MultiIndex.from_tuples(idx, names=PAIR_COLS),
+                columns=[self.label],
+                )
 
-        # Evaluate on unscaled data
+        # Evaluate on all splits, unscaled
         if self.kwargs.get("op_scaler", None):
+            self.unscaled_preds = dict() 
+            self.unscaled_ys = dict()
             for split in ["train", "val", "test"]:
-                unscaled = self.op_scaler.inverse_transform(
-                    self.truths[split][self.label]
-                )
-                self.truths[split] = pd.DataFrame(
-                    unscaled, index=self.truths[split].index, columns=[self.label]
-                )
-                self.preds[split] = self.op_scaler.inverse_transform(self.preds[split])
-
-                loss = self.evaluate(split, False)
+                loss, preds, ys, idx = self.evaluate(split, True, True)
                 self.__setattr__(f"{split}_loss_unscaled", loss)
+                self.unscaled_preds[split] = pd.DataFrame(
+                    preds, 
+                    index=pd.MultiIndex.from_tuples(idx, names=PAIR_COLS),
+                    columns=self.kwargs["output_label"],
+                    )
+                self.unscaled_ys[split] = pd.DataFrame(
+                    ys, 
+                    index=pd.MultiIndex.from_tuples(idx, names=PAIR_COLS),
+                    columns=[self.label],
+                    )
         else:
             for split in ["train", "val", "test"]:
                 self.__setattr__(
                     f"{split}_loss_unscaled", self.__getattribute__(f"{split}_loss")
                 )
 
-        # For easy reading, also write to results file
+        # Record results
         self.write_results()
+        log_msg("train", "Results:", self.train_loss, self.val_loss, self.test_loss, self.train_loss_unscaled, self.val_loss_unscaled, self.test_loss_unscaled)
 
         # Dump kwargs
         with open(os.path.join(self.kwargs["output"], "final_kwargs.yml"), "w") as f:
@@ -365,6 +386,16 @@ class Trainer:
         # Save model
         if self.kwargs.get("save_model"):
             self.save_model(self.kwargs["output"])
+
+        # Save predictions 
+        if self.kwargs.get("save"):
+            for split in ["train", "val", "test"]:
+                df = pd.concat([self.preds[split], self.ys[split]], axis=1)
+                df.to_csv(os.path.join(self.kwargs["output"], f"{split}_preds.csv"))
+                if self.kwargs.get("op_scaler", None):
+                    unscaled_df = pd.concat([self.unscaled_preds[split], self.unscaled_ys[split]], axis=1)
+                    unscaled_df.to_csv(os.path.join(self.kwargs["output"], f"{split}_preds_unscaled.csv"))
+
         log_msg("train", "Output folder:", self.kwargs["output"])
         log_msg("train", "Done")
 
@@ -415,17 +446,20 @@ class XGBTrainer(Trainer):
             verbose=True,
         )
 
-    def evaluate(self, split="val", return_preds=False):
+    def evaluate(self, split="val", return_preds=False, unscaled=False):
+        input = self.X[split].values
+        if unscaled:
+            input = self.ip_scaler.inverse_transform(input)
         if self.train_kwargs["task"].contains("regression"):
-            preds = self.model.predict(self.X[split].values)
+            preds = self.model.predict(input)
         elif self.train_kwargs["task"].contains("classification"):
-            preds = self.model.predict_proba(self.X[split].values)
+            preds = self.model.predict_proba(input)
         else:
             raise ValueError(f"[evaluate] Invalid task: {self.train_kwargs['task']}")
         loss = self.loss_fn(preds, self.truths[split].values)
         if not return_preds:
             preds = None
-        return loss, preds
+        return loss, preds, self.truths[split].values, self.truths[split].index.to_list()
 
     def save_model(self, model_dir):
         os.makedirs(model_dir, exist_ok=True)
@@ -536,7 +570,8 @@ class MLPTrainer(Trainer):
                 for epoch in range(self.train_kwargs["epochs"]):
                     self.epoch = epoch
                     self.train_losses.append(self.train_single_epoch())
-                    self.val_losses.append(self.evaluate("val", False))
+                    self.val_losses.append(self.evaluate("val", False)[0])
+                    log_msg("_train", f"epoch,{epoch},train_loss,{self.train_losses[-1]},val_loss,{self.val_losses[-1]}")
 
                     if self.train_kwargs.get("early_stopping", False):
                         if self.val_losses[-1] < self.best_val_loss:
@@ -586,29 +621,40 @@ class MLPTrainer(Trainer):
             losses.append(loss.item())
         return np.mean(losses)
 
-    def evaluate(self, split="val", return_preds=False):
+    def evaluate(self, split="val", return_preds=False, unscaled=False):
         losses = []
         preds = []
+        ys = []
+        indices = [] 
         self.model.eval()
         with torch.no_grad():
-            for i, (X, y, _) in enumerate(self.dataloaders[split]):
+            for i, (X, y, idx) in enumerate(self.dataloaders[split]):
                 # log_msg("evaluate", f"Batch {i}")
                 X = X.to(self.train_kwargs["device"])
                 y = y.to(self.train_kwargs["device"])
                 pred = self.model(X)
+                if unscaled:
+                    pred = self.op_scaler.inverse_transform(pred.cpu())
+                    y = self.op_scaler.inverse_transform(y.cpu())
+                    pred = torch.tensor(pred).float().to(self.train_kwargs["device"])
+                    y = torch.tensor(y).float().to(self.train_kwargs["device"])
                 loss = self.loss_fn(pred, y)
                 losses.append(loss.item())
+                indices.extend(list(zip(*idx)))
                 if return_preds:
-                    preds.append(pred)
+                    preds.append(pred.cpu())
+                    ys.append(y.cpu())
 
         if self.scheduler:
             self.scheduler.step(np.mean(losses))
         if return_preds:
             preds = torch.cat(preds, dim=0)
+            ys = torch.cat(ys, dim=0)
         else:
             preds = None
+            ys = None
 
-        return np.mean(losses), preds
+        return np.mean(losses), preds, ys, indices
 
     def process(self, X, truths):
         self.dataloaders = dict()
@@ -640,6 +686,7 @@ class MLPTrainer(Trainer):
             },
             os.path.join(model_dir, MLP_MODEL_FILE),
         )
+
 
 MODELS = dict(
     xgb_regressor=XGBRegressor,
