@@ -30,7 +30,7 @@ op_dir = "../../data/publication/shap/split_1/"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 kwargs = dict() 
 kwargs["saved_model"] = model_folder
-model = get_model("mlp_regressor", kwargs, device=device)
+model, _ = get_model("mlp_regressor", kwargs, device=device)
 
 # get feature column names
 with open(o_config_file, "r") as f:

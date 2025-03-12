@@ -11,6 +11,7 @@ from sigopt import Connection
 import socket
 import torch
 import yaml
+import json
 from zeobind.src.utils.loss import get_loss_fn
 from zeobind.src.utils.default_utils import RESULTS_FILE
 from zeobind.src.utils.logger import log_msg
@@ -53,12 +54,16 @@ def get_model(model_type, kwargs, device="cpu"):
     # saved model
     if kwargs.get("saved_model"):
         if "xgb" in model_type:
-            model = MODELS[model_type]
-            model.load_model(f"{kwargs['saved_model']}/{XGB_MODEL_FILE}")
+            model = MODELS[model_type]()
+            model_file = f"{kwargs['saved_model']}/{XGB_MODEL_FILE}"
+            model.load_model(model_file)
+            with open(model_file, "r") as f:
+                saved_dict = json.load(f)
         elif "mlp" in model_type:
             saved_dict = torch.load(f"{kwargs['saved_model']}/{MLP_MODEL_FILE}", map_location=device)
             model = MODELS[model_type](**saved_dict["model_args"])
             model.load_state_dict(saved_dict["model_state_dict"])
+            model.to(device)
         else:
             raise ValueError(f"[get_model] Invalid model type: {model_type}")
         log_msg("get_model", f"Loaded model\n{model}")

@@ -62,6 +62,7 @@ def single_model_preds(task, input_kwargs, condense=False):
     kwargs = deepcopy(input_kwargs)
     kwargs["task"] = task
     kwargs["model_paths"], kwargs["model_type"] = set_model_path_and_type(kwargs, task)
+    kwargs["saved_model"] = kwargs["model_paths"][0]
 
     log_msg("debug", kwargs["osda_prior_file"], kwargs["zeolite_prior_file"])
 
@@ -99,33 +100,44 @@ def single_model_preds(task, input_kwargs, condense=False):
         input_scaler = json.load(f)
     X_scaled = scale_data(X, input_scaler)
 
-    # make it torch friendly
-    X_scaled = torch.tensor(X_scaled.astype("float32").values)
-
-    # make it into a dataloader
-    X_scaled_dataloader = DataLoader(
-        X_scaled, batch_size=kwargs["batch_size"], shuffle=False
+    # format according to the model type
+    if "mlp" in kwargs["model_type"]:
+        X_scaled = torch.tensor(X_scaled.astype("float32").values)
+        X_scaled_dataloader = DataLoader(
+            X_scaled, batch_size=kwargs["batch_size"], shuffle=False
     )
+    elif "xgb" in kwargs["model_type"]:
+        X_scaled = X_scaled.values
 
     # get model
-    model = get_model(kwargs["model_type"], kwargs, kwargs["device"])
-    model.to(kwargs["device"])
+    model, _ = get_model(kwargs["model_type"], kwargs, kwargs["device"])
 
     # predict
     y_preds = []
     with torch.no_grad():
-        model.eval()
-        for X_batch in X_scaled_dataloader:
-            X_batch = X_batch.to(kwargs["device"])
-            y_preds.append(model(X_batch))
-
-    # format outputs
-    y_preds = torch.vstack(y_preds)
-    y_preds = y_preds.cpu().numpy()
+        if "mlp" in kwargs["model_type"]:
+            model.eval()
+            for X_batch in X_scaled_dataloader:
+                X_batch = X_batch.to(kwargs["device"])
+                y_preds.append(model(X_batch))
+            y_preds = torch.vstack(y_preds)
+            y_preds = y_preds.cpu().numpy()
+        
+        elif "xgb" in kwargs["model_type"]:
+            if "classification" in kwargs["task"]:
+                y_preds = model.predict_proba(X_scaled)
+            elif "regression" in kwargs["task"]:
+                y_preds = model.predict(X_scaled)
+            else:
+                raise ValueError(f"[single_model_preds] Task {self.train_kwargs['task']} not supported")
+        
+        else:
+            raise ValueError(f"[single_model_preds] Model type {kwargs['model_type']} not supported")
 
     # unscale predictions
     truth_scaler_file = os.path.join(kwargs["saved_model"], OUTPUT_SCALER_FILE)
     if os.path.exists(truth_scaler_file):
+        log_msg("single_model_preds", "Rescaling predictions")
         with open(truth_scaler_file, "r") as f:
             truth_scaler = json.load(f)
         y_preds = rescale_data(y_preds, truth_scaler)
@@ -202,7 +214,7 @@ def predict(files, kwargs, condense=False):
         kwargs["filename"] = f"{os.path.splitext(os.path.basename(files))[0]}_preds.csv"
 
     # predict
-    for task in kwargs["tasks"]:
+    for task in kwargs["task"]:
         log_msg("predict", "Predicting for", task)
         os.makedirs(f"{kwargs['output']}/{task}", exist_ok=True)
         task_kwargs = deepcopy(kwargs)
@@ -254,20 +266,17 @@ def main(kwargs):
     log_msg("main", "Output folder is", kwargs["output"])
     os.makedirs(kwargs["output"], exist_ok=True)
 
-    # ensemble settings
-    kwargs["ensemble"] = {ENERGY_TASK: False, BINARY_TASK: False, MCLASS_TASK: False}
-    if len(kwargs['binary_models']) > 1:
-        kwargs['ensemble'][BINARY_TASK] = True
-    if len(kwargs['energy_models']) > 1:
-        kwargs['ensemble'][ENERGY_TASK] = True
-    if len(kwargs['loading_models']) > 1:
-        kwargs['ensemble'][MCLASS_TASK] = True
-
     # task settings 
     if kwargs["task"] == "all":
-        kwargs["tasks"] = [ENERGY_TASK, BINARY_TASK, MCLASS_TASK]
+        kwargs["task"] = [ENERGY_TASK, BINARY_TASK, MCLASS_TASK]
     else:
         kwargs["task"] = [kwargs["task"]]
+
+    # ensemble settings
+    kwargs["ensemble"] = {ENERGY_TASK: False, BINARY_TASK: False, MCLASS_TASK: False}
+    for task in kwargs["task"]:
+        if len(kwargs[f"{task.split('_')[0]}_models"]) > 1:
+            kwargs["ensemble"][task] = True
 
     # start predictions
     if kwargs["num_processes"] == 1:
