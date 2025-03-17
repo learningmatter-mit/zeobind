@@ -31,12 +31,13 @@ The data used in the paper, dataset of hypothetical molecules, as well as predic
 
 ## Usage 
 
+This repo can be used to screen molecules from pre-generated predictions over the entire hypothetical OSDA library and experimentally known zeolites, predict for new molecules, and train models for each of the three prediction tasks described in the manuscript. Each functionality is described below. To learn more about the available user-specified inputs, read the `argparse` portion of the python script that is called in the corresponding bash script.
 
 ### Screening molecules from predictions 
 
-We provide a bash script for screening for molecules for a targeted framework using the pre-generated predictions stored inside `data/predictions`. 
+We provide an example bash script for screening for molecules for a targeted framework using the pre-generated predictions stored inside `data/predictions`. 
 
-Example bash scripts, which are also the ones used in the paper's CHA and ERI case studies, can be found at `run_scripts/inference/screen_{cha,eri}.sh`. Run
+Example bash scripts, which are also the ones used in the paper's CHA and ERI case studies, can be found at `run_scripts/inference/screen_{cha,eri}.sh`. The example script takes as input the target framework, desired charge of the molecule and down selection filters, and screens the already generated predicted binding energies of hypothetical molecules and saves the final pool of selected molecules. Run
 
 ```bash
 bash run_scripts/inference/screen_cha.sh
@@ -44,19 +45,17 @@ bash run_scripts/inference/screen_cha.sh
 
 ### Predicting on new molecules
 
-If you have a new set of molecules you would like to predict on, an example bash script can be found at `run_scripts/predict.sh`.
+If you have a new set of molecules you would like to predict on, an example bash script can be found at `run_scripts/predict.sh`. It takes as input the list of molecules and list of zeolites, generates conformers and computes descriptors based on them for each molecule, reads the already generated descriptors for the zeolite, and then predicts and saves the binding energies. Change the `task` flag depending on which of the three tasks you would like to predict for. 
 
 ```bash
 bash run_scripts/inference/predict.sh
 ```
 
-
 ### Training models 
 
-To train models, template bash scripts can be found at `run_scripts/training/`.
+To train models, example bash scripts can be found at `run_scripts/training/`. It requires the training dataset, data splits, molecule and zeolite input files, and model architecture and training parameters.
 
 ```bash
-# example
 bash run_scripts/training/binary/template.sh
 ```
 
