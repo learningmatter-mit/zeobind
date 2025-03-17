@@ -101,7 +101,7 @@ if __name__ == "__main__":
     parser.add_argument("--weight_2", type=float, help="weight 2", default=0.0)
     # parser.add_argument("l_sizes", type=int, nargs="+", help="layer sizes", default=[])
     parser.add_argument("--ip_scaler", type=str, help="input scaler", default="standard")
-    parser.add_argument("--op_scaler", type=str, help="output scaler", default="standard")
+    parser.add_argument("--op_scaler", type=str, help="output scaler", default=None)
     parser.add_argument("--optimizer", type=str, help="optimizer", default="adam")
     parser.add_argument("--scheduler", action="store_true", help="scheduler")
     parser.add_argument("--epochs", type=int, help="epochs", default=500)

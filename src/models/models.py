@@ -125,6 +125,7 @@ class Trainer:
     def train(self):
         """Main function for training the model. Uses self.kwargs."""
         start = time.time()
+        log_msg("train", "Training model")
 
         # Load data
         self.truth = pd.read_csv(self.kwargs["truth"])

@@ -129,7 +129,7 @@ def single_model_preds(task, input_kwargs, condense=False):
             elif "regression" in kwargs["task"]:
                 y_preds = model.predict(X_scaled)
             else:
-                raise ValueError(f"[single_model_preds] Task {self.train_kwargs['task']} not supported")
+                raise ValueError(f"[single_model_preds] Task {kwargs['task']} not supported")
         
         else:
             raise ValueError(f"[single_model_preds] Model type {kwargs['model_type']} not supported")

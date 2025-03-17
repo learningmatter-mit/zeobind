@@ -1,5 +1,6 @@
 source ~/.bashrc
-mamba activate zeo_bind
+# source ~/.zshrc # For Apple M1. Also change device (below) to mps
+mamba activate zeobind
 
 # If using sigopt, set the SIGOPT_API_TOKEN environment variable in .bashrc
 

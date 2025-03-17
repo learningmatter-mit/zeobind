@@ -1,5 +1,6 @@
 source ~/.bashrc
-mamba activate zeo_bind
+# source ~/.zshrc # For Apple M1. Also change device (below) to mps
+mamba activate zeobind
 
 parent_dir=~/projects/affinity 
 repo_dir=$parent_dir/zeobind
