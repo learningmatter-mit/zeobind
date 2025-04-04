@@ -34,4 +34,16 @@ class LoadingTask:
         self.output_label = [f"{COL_DICT[MCLASS_TASK]}_{i} pred" for i in bins_dict.keys()]
         self.class_op_size = len(bins_dict.keys())
 
-PREDICTION_TASK_DICT = dict(energy_regression=EnergyTask, binary_classification=FitTask, loading_classification=LoadingTask)
+
+class MultitaskTask: 
+    def __init__(self):
+        self.task = "multitask"
+        bins, bins_dict, _ = get_load_norm_bins()
+        self.label = [COL_DICT[BINARY_TASK], COL_DICT[ENERGY_TASK]] + [f"{COL_DICT[MCLASS_TASK]}_{i}" for i in bins_dict.keys()]
+        self.output_label = ["nb", "b"] + [COL_DICT[ENERGY_TASK] + " pred"] + [f"{COL_DICT[MCLASS_TASK]}_{i} pred" for i in bins_dict.keys()]
+        self.binary_class_op_size = 2
+        self.energy_class_op_size = 1 
+        self.load_class_op_size = len(bins_dict.keys())
+
+
+PREDICTION_TASK_DICT = dict(energy_regression=EnergyTask, binary_classification=FitTask, loading_classification=LoadingTask, multitask=MultitaskTask)

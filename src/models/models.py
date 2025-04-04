@@ -12,6 +12,7 @@ import socket
 import torch
 import yaml
 import json
+from zeobind.src.utils.pred_tasks import COL_DICT, ENERGY_TASK
 from zeobind.src.utils.loss import get_loss_fn
 from zeobind.src.utils.default_utils import RESULTS_FILE
 from zeobind.src.utils.logger import log_msg
@@ -39,7 +40,7 @@ OPTIMIZERS = dict(
 MLP_MODEL_FILE = "model.pt"
 XGB_MODEL_FILE = "model.json"
 
-def get_model(model_type, kwargs, device="cpu"):
+def get_model(model_type, kwargs, device="cpu", filename=None):
     """
     Get a model. If a saved model is provided, load it assuming the model parameters are saved.
 
@@ -55,12 +56,14 @@ def get_model(model_type, kwargs, device="cpu"):
     if kwargs.get("saved_model"):
         if "xgb" in model_type:
             model = MODELS[model_type]()
-            model_file = f"{kwargs['saved_model']}/{XGB_MODEL_FILE}"
+            filename = XGB_MODEL_FILE if not filename else filename
+            model_file = f"{kwargs['saved_model']}/{filename}"
             model.load_model(model_file)
             with open(model_file, "r") as f:
                 saved_dict = json.load(f)
         elif "mlp" in model_type:
-            saved_dict = torch.load(f"{kwargs['saved_model']}/{MLP_MODEL_FILE}", map_location=device)
+            filename = MLP_MODEL_FILE if not filename else filename
+            saved_dict = torch.load(f"{kwargs['saved_model']}/{filename}", map_location=device)
             model = MODELS[model_type](**saved_dict["model_args"])
             model.load_state_dict(saved_dict["model_state_dict"])
             model.to(device)
@@ -101,9 +104,14 @@ class Trainer:
         self.loss_fn = get_loss_fn(
             kwargs["loss_1"],
             kwargs.get("loss_2", None),
+            kwargs.get("loss_3", None),
+            kwargs.get("loss_4", None),
             kwargs.get("weight_1", 1.0),
             kwargs.get("weight_2", 0.0),
-        )        
+            kwargs.get("weight_3", 0.0),
+            kwargs.get("weight_4", 0.0),
+            kwargs["task"],
+        )
 
     def get_model(self, model_kwargs=None):
         """If model_kwargs are provided, they override the model parameters specified in self.kwargs."""
@@ -134,7 +142,7 @@ class Trainer:
         log_msg("train", "Number of molecules:", len(all_osdas))
         log_msg("train", "Number of zeolites:", len(all_zeolites))
         self.truth = self.truth.set_index(PAIR_COLS)
-        self.label = self.kwargs["label"]
+        self.label = self.kwargs["label"] 
         self.truth = self.truth[self.label]
 
         # Load features
@@ -173,7 +181,7 @@ class Trainer:
                 all_zeolites,
                 test_size=self.kwargs["val_frac"] + self.kwargs["test_frac"],
                 random_state=self.kwargs["seed"],
-            )[0]
+            )
             val_idx, test_idx = train_test_split(
                 test_idx,
                 test_size=self.kwargs["test_frac"]
@@ -225,18 +233,19 @@ class Trainer:
         # Scale truth
         if self.kwargs.get("op_scaler", None):
             self.op_scaler = SCALERS[self.kwargs["op_scaler"]]()
-            to_scale = truths["train"][self.label]
+            self.label_to_scale = COL_DICT[ENERGY_TASK] if self.kwargs["task"] == "multitask" else self.label
+            to_scale = truths["train"][self.label_to_scale] 
             if len(to_scale.shape) == 1:
                 to_scale = to_scale.values.reshape(-1, 1)
             self.op_scaler.fit(to_scale)
 
             for split in ["train", "val", "test"]:
-                to_scale = truths[split][self.label].values 
+                to_scale = truths[split][self.label_to_scale].values 
                 if len(to_scale.shape) == 1:
                     to_scale = to_scale.reshape(-1, 1)
                 scaled = self.op_scaler.transform(to_scale)
-                truths[split][self.label] = pd.DataFrame(
-                    scaled, index=truths[split].index, columns=[self.label]
+                truths[split][self.label_to_scale] = pd.DataFrame(
+                    scaled, index=truths[split].index, columns=[self.label_to_scale]
                 )
 
             save_scaler(self.op_scaler, self.kwargs["op_scaler"], self.kwargs["output"], OUTPUT_SCALER_FILE)
@@ -541,6 +550,46 @@ class Regressor(nn.Module):
         return self.regressor(x)
 
 
+class MLPMultiTask(nn.Module):
+    def __init__(
+        self, 
+        l_sizes=(16, 8),
+        class_op_size=8,
+        batch_norm=False,
+        dropout=0.5,
+        binary_l_sizes=(8, 4),
+        binary_class_op_size=2,
+        binary_batch_norm=False,
+        binary_softmax=True,
+        binary_dropout=0.5,
+        energy_l_sizes=(8, 4), 
+        energy_class_op_size=1, 
+        energy_batch_norm=False, 
+        energy_dropout=0.5,
+        load_l_sizes=(8, 4),
+        load_class_op_size=2,
+        load_batch_norm=False,
+        load_softmax=True,
+        load_dropout=0.5,
+    ): 
+        super(MLPMultiTask, self).__init__()
+        assert l_sizes[-1] == binary_l_sizes[0] == energy_l_sizes[0] == load_l_sizes[0]
+        
+        self.model = Regressor(l_sizes, class_op_size, batch_norm, dropout)
+
+        # readout layers
+        self.binary = NClass(binary_l_sizes, binary_class_op_size, binary_batch_norm, binary_softmax, binary_dropout)
+        self.energy = Regressor(energy_l_sizes, energy_class_op_size, energy_batch_norm, energy_dropout)
+        self.load = NClass(load_l_sizes, load_class_op_size, load_batch_norm, load_softmax, load_dropout)
+
+    def forward(self, x):
+        model_out = self.model(x)
+        binary_out = self.binary(model_out)
+        energy_out = self.energy(model_out)
+        load_out = self.load(model_out)
+        return [binary_out, energy_out, load_out]
+    
+
 class MLPTrainer(Trainer):  
     def __init__(self, kwargs):
         super().__init__(kwargs)
@@ -588,10 +637,17 @@ class MLPTrainer(Trainer):
                         else:
                             self.patience -= 1
                             if self.patience == 0:
+                                log_msg("_train", "Early stopping at epoch", epoch)
                                 break
                     else:
                         self.best_model_state = self.model.state_dict()
                         self.best_epoch = epoch
+                    
+                    self.save_model(self.kwargs["output"], f"model_best_{self.best_epoch}.pt")
+                
+                # save best model 
+                self.save_model(self.kwargs["output"], f"model_final_{self.best_epoch}.pt")
+
 
             except RuntimeError as e:
                 if "out of memory" in str(e):
@@ -640,14 +696,22 @@ class MLPTrainer(Trainer):
                 y = y.to(self.train_kwargs["device"])
                 pred = self.model(X)
                 if unscaled:
-                    pred = self.op_scaler.inverse_transform(pred.cpu())
-                    y = self.op_scaler.inverse_transform(y.cpu())
-                    pred = torch.tensor(pred).float().to(self.train_kwargs["device"])
-                    y = torch.tensor(y).float().to(self.train_kwargs["device"])
+                    if self.kwargs["task"] == "multitask":
+                        pred_to_unscale = self.op_scaler.inverse_transform(pred[1].cpu())
+                        y_to_unscale = self.op_scaler.inverse_transform(y[:, 1].reshape(-1, 1).cpu())
+                        pred[1] = torch.tensor(pred_to_unscale).float().to(self.train_kwargs["device"])
+                        y[:, 1] = torch.tensor(y_to_unscale.squeeze()).float().to(self.train_kwargs["device"])
+                    else:
+                        pred = self.op_scaler.inverse_transform(pred.cpu())
+                        y = self.op_scaler.inverse_transform(y.cpu())
+                        pred = torch.tensor(pred).float().to(self.train_kwargs["device"])
+                        y = torch.tensor(y).float().to(self.train_kwargs["device"])
                 loss = self.loss_fn(pred, y)
                 losses.append(loss.item())
                 indices.extend(list(zip(*idx)))
                 if return_preds:
+                    if self.kwargs["task"] == "multitask":
+                        pred = torch.concat(pred, axis=1)
                     preds.append(pred.cpu())
                     ys.append(y.cpu())
 
@@ -668,7 +732,6 @@ class MLPTrainer(Trainer):
             indices = X[split].index.to_list()
             X[split] = torch.tensor(X[split].values.astype('float64')).float()
             truths[split] = torch.tensor(truths[split].values.astype('float64')).float()
-
             dataset = MultiTaskTensorDataset(X[split], truths[split], indices)
             self.dataloaders[split] = DataLoader(
                 dataset,
@@ -679,7 +742,7 @@ class MLPTrainer(Trainer):
 
         return X, truths
 
-    def save_model(self, model_dir):
+    def save_model(self, model_dir, model_file=MLP_MODEL_FILE):
         os.makedirs(model_dir, exist_ok=True)
         torch.save(
             {
@@ -690,7 +753,7 @@ class MLPTrainer(Trainer):
                 "val_losses": self.val_losses,
                 "model_args": self.model_args,
             },
-            os.path.join(model_dir, MLP_MODEL_FILE),
+            os.path.join(model_dir, model_file),
         )
 
 
@@ -699,4 +762,5 @@ MODELS = dict(
     xgb_classifier=XGBClassifier,
     mlp_regressor=Regressor,
     mlp_classifier=NClass,
+    mlp_multitask=MLPMultiTask,
 )

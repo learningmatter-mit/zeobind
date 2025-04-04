@@ -30,7 +30,7 @@ from zeobind.src.utils.utils import (
     scale_data,
 )
 from zeobind.src.utils.logger import log_msg
-from zeobind.src.models.models import get_model
+from zeobind.src.models.models import MLP_MODEL_FILE, get_model
 
 
 def set_model_path_and_type(kwargs, task):
@@ -43,6 +43,11 @@ def set_model_path_and_type(kwargs, task):
     elif task == MCLASS_TASK:
         model_paths = kwargs["loading_models"]
         model_type = kwargs["loading_model_type"]
+    elif task == "multitask":
+        model_paths = kwargs["multitask_models"]
+        model_type = kwargs["multitask_model_type"]
+    else:
+        raise ValueError(f"[set_model_path_and_type] Task {task} not supported")
     return model_paths, model_type
 
 
@@ -63,8 +68,6 @@ def single_model_preds(task, input_kwargs, condense=False):
     kwargs["task"] = task
     kwargs["model_paths"], kwargs["model_type"] = set_model_path_and_type(kwargs, task)
     kwargs["saved_model"] = kwargs["model_paths"][0]
-
-    log_msg("debug", kwargs["osda_prior_file"], kwargs["zeolite_prior_file"])
 
     # Get list of framework-molecule pair identities
     if kwargs.get("full_matrix", True):
@@ -110,7 +113,7 @@ def single_model_preds(task, input_kwargs, condense=False):
         X_scaled = X_scaled.values
 
     # get model
-    model, _ = get_model(kwargs["model_type"], kwargs, kwargs["device"])
+    model, _ = get_model(kwargs["model_type"], kwargs, kwargs["device"], kwargs["model_file"])
 
     # predict
     y_preds = []
@@ -119,7 +122,10 @@ def single_model_preds(task, input_kwargs, condense=False):
             model.eval()
             for X_batch in X_scaled_dataloader:
                 X_batch = X_batch.to(kwargs["device"])
-                y_preds.append(model(X_batch))
+                y_pred = model(X_batch)
+                if kwargs["task"] == "multitask":
+                    y_pred = torch.concat(y_pred, axis=1)
+                y_preds.append(y_pred)
             y_preds = torch.vstack(y_preds)
             y_preds = y_preds.cpu().numpy()
         
@@ -140,8 +146,12 @@ def single_model_preds(task, input_kwargs, condense=False):
         log_msg("single_model_preds", "Rescaling predictions")
         with open(truth_scaler_file, "r") as f:
             truth_scaler = json.load(f)
-        y_preds = rescale_data(y_preds, truth_scaler)
+        if kwargs["task"] == "multitask":
+            y_preds[:, 2] = rescale_data(y_preds[:, 2], truth_scaler)
+        else:
+            y_preds = rescale_data(y_preds, truth_scaler)
 
+    # format predictions
     if task == BINARY_TASK or task == MCLASS_TASK:
         if condense: # save class instead of proba
             log_msg("single_model_preds", f"Condensing probabilities to class for {task}")
@@ -156,6 +166,15 @@ def single_model_preds(task, input_kwargs, condense=False):
             elif task == MCLASS_TASK:
                 _, bins_dict, _ = get_load_norm_bins()
                 kwargs["label"] = [f"{COL_DICT[MCLASS_TASK]}_{i}" for i in bins_dict.keys()]
+    elif task == "multitask":
+        if condense:
+            binary_preds = np.argmax(y_preds[:, :2], axis=1)
+            energy_preds = y_preds[:, 2]
+            load_preds = np.argmax(y_preds[:, 3:], axis=1)
+            y_preds = np.vstack([binary_preds, energy_preds, load_preds]).T
+            kwargs['label'] = ["b", "Binding (SiO2)", "load_norm_class"]
+        else:
+            kwargs["label"] = ["nb", "b", "Binding (SiO2)"] + [f"{COL_DICT[MCLASS_TASK]}_{i}" for i in bins_dict.keys()]
 
     y_preds = pd.DataFrame(y_preds, columns=[kwargs["label"]], index=pairs.index)
     log_msg("single_model_preds", "Total time:", "{:.2f}".format((time.time() - single_start_time) / 60), "mins")
@@ -222,7 +241,6 @@ def predict(files, kwargs, condense=False):
         task_kwargs.update(task_obj.__dict__)
         task_kwargs["model_paths"] = kwargs[f"{task.split('_')[0]}_models"]
 
-
         if not kwargs["ensemble"][task]:
             y_preds = single_model_preds(task, task_kwargs, task_kwargs.get('condense', condense))
         else:
@@ -273,9 +291,9 @@ def main(kwargs):
         kwargs["task"] = [kwargs["task"]]
 
     # ensemble settings
-    kwargs["ensemble"] = {ENERGY_TASK: False, BINARY_TASK: False, MCLASS_TASK: False}
+    kwargs["ensemble"] = {ENERGY_TASK: False, BINARY_TASK: False, MCLASS_TASK: False, "multitask": False}
     for task in kwargs["task"]:
-        if len(kwargs[f"{task.split('_')[0]}_models"]) > 1:
+        if len(kwargs.get(f"{task.split('_')[0]}_models", [None])) > 1:
             kwargs["ensemble"][task] = True
 
     # start predictions
@@ -295,12 +313,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="zeobind prediction")
 
     # models 
-    parser.add_argument("--binary_models", nargs='+', help="Binary classification model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made")
+    parser.add_argument("--binary_models", nargs='+', help="Binary classification model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made", default=[])
     parser.add_argument("--binary_model_type", help="Binary model type", choices=["xgb_classifier", "mlp_classifier"])
-    parser.add_argument("--energy_models", nargs='+', help="Energy regression model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made")
+    parser.add_argument("--energy_models", nargs='+', help="Energy regression model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made", default=[])
     parser.add_argument("--energy_model_type", help="Energy model type", choices=["xgb_regressor", "mlp_regressor"])
-    parser.add_argument("--loading_models", nargs='+', help="Loading multiclassification model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made")
+    parser.add_argument("--loading_models", nargs='+', help="Loading multiclassification model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made", default=[])
     parser.add_argument("--loading_model_type", help="Loading model type", choices=["xgb_classifier", "mlp_classifier"])
+    parser.add_argument("--multitask_models", nargs='+', help="Multitask model filepaths. If more than one is provided, it is assumed that ensemble predictions will be made", default=[])
+    parser.add_argument("--multitask_model_type", help="Multitask model type", choices=["mlp_multitask"])
+    parser.add_argument("--model_file", help="Model file", default=MLP_MODEL_FILE)
 
     # set up 
     parser.add_argument("--device", help="Device", default="cpu")
@@ -318,7 +339,7 @@ if __name__ == "__main__":
     parser.add_argument("--pairs_folders", nargs="+", help="Folders containing framework-molecule pairs. This is used if full_matrix is False", default=[])
 
     # predictions 
-    parser.add_argument("--task", help="Prediction task", choices=["all", BINARY_TASK, ENERGY_TASK, MCLASS_TASK], required=True)
+    parser.add_argument("--task", help="Prediction task", choices=["all", BINARY_TASK, ENERGY_TASK, MCLASS_TASK, "multitask"], required=True)
     parser.add_argument("--condense", help="Condense classification outputs from probabilities", action="store_true")
     parser.add_argument("--output", help="Output folder", required=True)
     parser.add_argument("--batch_size", help="Batch size", type=int, default=256)
