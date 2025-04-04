@@ -4,9 +4,9 @@ mamba activate zeo_bind
 parent_dir=~/projects/affinity 
 repo_dir=$parent_dir/zeobind
 data_dir=$repo_dir/data
-model_dir=$repo_dir/data/runs
-preds_dir=$repo_dir/data/predictions
-filtered_dir=$repo_dir/data/filtered
+model_dir=$data_dir/runs
+preds_dir=$data_dir/predictions
+filtered_dir=$data_dir/filtered
 cd $parent_dir 
 
 fw=ERI

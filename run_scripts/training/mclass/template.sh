@@ -7,7 +7,7 @@ mamba activate zeobind
 parent_dir=~/projects/affinity 
 repo_dir=$parent_dir/zeobind
 data_dir=$repo_dir/data
-run_output_dir=$repo_dir/data/runs
+run_output_dir=$data_dir/runs
 cd $parent_dir 
 
 task=loading_classification
@@ -41,7 +41,6 @@ python zeobind/src/train.py \
     --layers 2 \
     --neurons 512 \
     --dropout 0.4 \
-    --num_classes 46 \
     --task $task \
     --lr_patience 20 \
     --shuffle_batch \

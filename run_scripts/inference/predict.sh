@@ -5,8 +5,8 @@ mamba activate zeobind
 parent_dir=~/projects/affinity 
 repo_dir=$parent_dir/zeobind
 data_dir=$repo_dir/data
-model_dir=$repo_dir/data/runs
-preds_dir=$repo_dir/data/predictions
+model_dir=$data_dir/runs
+preds_dir=$data_dir/predictions
 cd $parent_dir 
 
 binary_models=("$model_dir/mlp/binary/2/1" "$model_dir/mlp/binary/2/2" "$model_dir/mlp/binary/2/3" "$model_dir/mlp/binary/2/4" "$model_dir/mlp/binary/2/5")
