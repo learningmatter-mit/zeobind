@@ -4,6 +4,7 @@ from datetime import datetime
 import matplotlib as mpl
 import matplotlib.font_manager as fm
 from matplotlib import pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 import yaml
 from collections import defaultdict
 import glob
@@ -346,9 +347,10 @@ def format_axs(
 
 
 def get_cb(
-    fig, sc, axs, label, ticks=None, linewidth=2, tickwidth=2, labelsize=18, labelpad=20
+    fig, sc, axs, label, ticks=None, linewidth=2, tickwidth=2, labelsize=18, labelpad=20, cmap='viridis',
 ):
     """Get colorbar"""
+    sc.set_cmap(cmap)
     cb = fig.colorbar(sc, ax=axs)
     cb.set_label(label, fontsize=labelsize)
     cb.outline.set_linewidth(linewidth)
@@ -405,3 +407,45 @@ def draw_parity(axs, xlimits, ylimits, lw=1):
     limits = [min(xlimits[0], ylimits[0]), max(xlimits[1], ylimits[1])]
     axs.plot(limits, limits, "k--", lw=lw)
     return axs
+
+def create_cmap_from_colors(cmap_name, colors):
+    """
+    Create a colormap from a list of colors.
+    Args:
+        cmap_name (str): Name of the colormap.
+        colors (list): List of colors.
+    Returns:
+        LinearSegmentedColormap: Colormap object.
+    Example:
+        colors = np.array([
+            (247,251,255),
+            (222,235,247),
+            (198,219,239),
+            (158,202,225),
+            (107,174,214),
+            (66,146,198),
+            (33,113,181),
+            (8,81,156),
+            (8,48,107),
+        ]) / 256
+        cmap_name = "blue_white"
+        cmap = create_cmap_from_colors(cmap_name, colors)
+    """
+    return LinearSegmentedColormap.from_list(cmap_name, colors)
+
+def restrict_cmap(cmap, min_val, max_val):
+    """
+    Restrict a colormap to a certain range.
+    Args:
+        cmap: Colormap to restrict.
+        min_val: Minimum value of the colormap.
+        max_val: Maximum value of the colormap.
+    Returns:
+        Restricted colormap.
+    
+    Example:
+        cmap = plt.get_cmap("viridis")
+        restricted_cmap = restrict_cmap(cmap, 0.2, 0.8)
+    """
+    new_colors = cmap(np.linspace(min_val, max_val, 256))
+    return LinearSegmentedColormap.from_list("new_viridis", new_colors)
