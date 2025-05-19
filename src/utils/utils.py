@@ -269,6 +269,7 @@ cm = 1 / 2.54  # centimeters in inches
 def setup_mpl():
     mpl.rcParams["pdf.fonttype"] = 42
     mpl.rcParams["ps.fonttype"] = 42
+    mpl.rcParams['svg.fonttype'] = 'none'
 
     if os.path.exists(MPL_FONTS_DIR):
         # Register the fonts with Matplotlib
